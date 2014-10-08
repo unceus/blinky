@@ -71,9 +71,22 @@ class BlinkyController
     self
   end
 
-  def random_fade iterations
+  def random_fade iterations, fade_length
     @color_sets = []
-    60.times { @color_sets << ColorSet.new([RGBLight.new(iterations: iterations, start_color: ColorHelper.random_hex_color, end_color: ColorHelper.random_hex_color)]) }
+    @raw_colors = []
+
+    (iterations+1).times { @raw_colors << ColorHelper.random_hex_color }
+
+    60.times do |light_idx|
+      @colors = []
+
+      iterations.times do |color_idx|
+        @colors << RGBLight.new(iterations: fade_length, start_color: @raw_colors[color_idx], end_color: @raw_colors[color_idx+1])
+      end
+
+      @color_sets[light_idx] = ColorSet.new(@colors)
+    end
+
     @strip.send_colors @color_sets
     self
   end
