@@ -21,7 +21,7 @@ class RGBLight
   extend Color
   attr_accessor :iterations
 
-  def initialize start_color: Color::RGB::Blue, end_color: Color::RGB::Blue, iterations: 10, animation: :fade
+  def initialize start_color: Color::RGB::Blue, end_color: Color::RGB::Red, iterations: 10, animation: :fade
     @start_color = start_color
     @end_color = end_color
     @iterations = iterations
@@ -38,6 +38,10 @@ class RGBLight
 
   def b idx
     calc :blue, idx
+  end
+
+  def rgb(idx)
+    OpenStruct.new(r: r(idx), g: g(idx), b: b(idx))
   end
 
   def start_color
@@ -80,7 +84,7 @@ class BlinkyController
   end
 
   def full_fade iterations
-    @strip.send_colors RGBLight.new(iterations: iterations, end_color: Color::RGB::Red).rgb_colors_array
+    @strip.send_color RGBLight.new(iterations: iterations, end_color: Color::RGB::Red).rgb_colors_array
     self
   end
 
@@ -100,11 +104,11 @@ class BlinkyController
       @color_sets[light_idx] = ColorSet.new(@colors)
     end
 
-    @strip.send_colors @color_sets
+    @strip.send_color @color_sets
     self
   end
 
-  def fade_duration duration_seconds, iterations_seed = 50
+  def fade_duration duration_seconds = 60, iterations_seed = 50
     colors = RGBLight.new(iterations: ColorHelper.ensure_nonzero(rand(iterations_seed)), start_color: ColorHelper.random_hex_color, end_color: ColorHelper.random_hex_color)
     current_time = frames = current_frame = 0
     start = Time.now
@@ -115,8 +119,50 @@ class BlinkyController
         frames = colors.iterations - 1
         current_frame = 0
       end
-      @strip.send_colors [colors.rgb_colors_array[current_frame]]
+      @strip.send_color [colors.rgb_colors_array[current_frame]]
       current_frame = current_frame + 1
+    end
+  end
+
+  def fade_cascade(duration_seconds: 60, iterations: 50, colors: :random)
+    frames = []
+    start = Time.now
+
+    if colors == :random
+      current_color = RGBLight.new(iterations: ColorHelper.ensure_nonzero(rand(iterations)), start_color: ColorHelper.random_hex_color, end_color: ColorHelper.random_hex_color)
+    else
+      first_color, color_idx = get_next_color(colors, colors.length)
+      next_color, color_idx = get_next_color(colors, color_idx)
+      current_color = RGBLight.new(iterations: iterations, start_color: first_color, end_color: next_color)
+    end
+
+    frames = frames + current_color.rgb_colors_array
+
+    while frames.length < 60
+      if colors == :random
+        next_color = ColorHelper.random_hex_color
+      else
+        next_color, color_idx = get_next_color(colors, color_idx)
+      end
+
+      current_color = RGBLight.new(iterations: colors == :random ? ColorHelper.ensure_nonzero(rand(iterations)) : iterations, start_color: current_color.end_color, end_color: next_color)
+      frames = frames + current_color.rgb_colors_array
+    end
+
+    while Time.now - start < duration_seconds
+
+      @strip.send_colors(frames.slice(0, 60))
+      frames = frames.slice(1, frames.length)
+
+      if frames.length < 60
+        if colors == :random
+          current_color = RGBLight.new(iterations: ColorHelper.ensure_nonzero(rand(iterations)), start_color: current_color.end_color, end_color: ColorHelper.random_hex_color)
+        else
+          next_color, color_idx = get_next_color(colors, color_idx)
+          current_color = RGBLight.new(iterations: ColorHelper.ensure_nonzero(rand(iterations)), start_color: current_color.end_color, end_color: next_color)
+        end
+        frames = frames + current_color.rgb_colors_array
+      end
     end
   end
 
@@ -134,31 +180,52 @@ class BlinkyController
     @strip.send_colors @color_sets
     self
   end
+  private
+
+  def get_next_color(colors, idx)
+    if (idx + 1) > (colors.length - 1)
+      [color_string_to_class(colors[0]), 0]
+    else
+      [color_string_to_class(colors[idx + 1]), idx + 1]
+    end
+  end
+
+  def color_string_to_class(color_string)
+    Object.const_get("Color::RGB::#{color_string.capitalize}")
+  end
 end
 
 class BlinkyStrip
   extend Color
   def initialize
-    @blinky = BlinkyTape.new('/dev/cu.usbmodemFA131')
+    @blinky = BlinkyTape.new('/dev/cu.usbmodemFD131')
   end
 
-  def send_color color
-    @blinky.send_pixel color.r, color.g, color.b
-  end
-
-  def send_colors color_set
+  def send_color color_set
     color_set.each do |color|
       60.times do |light|
-        send_color(color)
+        send_pixel(color)
       end
       show
     end
+  end
+
+  def send_colors colors
+    colors.each do |light|
+      send_pixel(light)
+    end
+    show
   end
 
   def show
     @blinky.show
     @blinky.show
     @blinky.show
+  end
+
+  private
+  def send_pixel color
+    @blinky.send_pixel color.r, color.g, color.b
   end
 end
 
